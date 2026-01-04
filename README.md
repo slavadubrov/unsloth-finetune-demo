@@ -13,7 +13,7 @@ A streamlined demo for fine-tuning NVIDIA's Nemotron-Nano-4B model using [Unslot
 
 ```bash
 # Clone repository
-git clone <your-repo-url>
+git clone https://github.com/slavadubrov/unsloth-finetune-demo.git
 cd fine-tuning-repo
 
 # Sync dependencies

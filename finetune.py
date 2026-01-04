@@ -13,12 +13,14 @@ Requirements:
 
 import torch
 from datasets import load_dataset
+from unsloth import FastLanguageModel
 from transformers import TrainingArguments
 from trl import SFTTrainer
-from unsloth import FastLanguageModel
 
 # Configuration
 MODEL_NAME = "nvidia/Llama-3.1-Nemotron-Nano-4B-v1.1"
+DATASET_NAME = "glaiveai/glaive-function-calling-v2"
+# Training parameters
 MAX_SEQ_LENGTH = 4096
 LORA_R = 16
 LORA_ALPHA = 32
@@ -65,7 +67,7 @@ def prepare_dataset(tokenizer, max_samples: int | None = None):
     """Load and prepare glaive-function-calling-v2 dataset."""
     print("Loading glaive-function-calling-v2 dataset...")
 
-    dataset = load_dataset("glaiveai/glaive-function-calling-v2", split="train")
+    dataset = load_dataset(DATASET_NAME, split="train")
 
     if max_samples:
         dataset = dataset.select(range(min(max_samples, len(dataset))))

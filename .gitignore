@@ -5,6 +5,7 @@ build/
 dist/
 wheels/
 *.egg-info
+node_modules/
 
 # Virtual environments
 .venv
@@ -12,3 +13,4 @@ wheels/
 # data files
 data/
 outputs/
+unsloth_compiled_cache/
