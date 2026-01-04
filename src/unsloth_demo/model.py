@@ -4,6 +4,10 @@ This module handles loading the base model with Unsloth optimizations,
 applying LoRA adapters, and saving in various formats.
 """
 
+import glob
+import shutil
+from pathlib import Path
+
 from unsloth import FastLanguageModel
 
 from .config import (
@@ -129,7 +133,23 @@ def save_gguf(model, tokenizer, output_dir: str, quantization: str = "q4_k_m"):
         output_dir: Base directory (will append '-gguf').
         quantization: Quantization method (q4_k_m, q5_k_m, q8_0, f16).
     """
+
     gguf_output = f"{output_dir}-gguf"
     print(f"Exporting to GGUF ({quantization}) at {gguf_output}...")
     model.save_pretrained_gguf(gguf_output, tokenizer, quantization_method=quantization)
+
+    # Unsloth saves GGUF files to the current working directory
+    # Move them to the specified output directory
+    gguf_output_path = Path(gguf_output)
+    gguf_output_path.mkdir(parents=True, exist_ok=True)
+
+    # Find and move all GGUF files from CWD to output directory
+    cwd_gguf_files = glob.glob("*.gguf")
+    for gguf_file in cwd_gguf_files:
+        src = Path(gguf_file)
+        dst = gguf_output_path / gguf_file
+        if src.exists():
+            shutil.move(str(src), str(dst))
+            print(f"  Moved {gguf_file} → {dst}")
+
     print(f"✓ Saved GGUF to {gguf_output}")

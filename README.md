@@ -116,10 +116,23 @@ uv run infer --prompt "Book a flight to Tokyo for tomorrow"
 
 ### With llama.cpp (GGUF)
 
-```bash
-git clone https://github.com/ggerganov/llama.cpp && cd llama.cpp && make
+**Install llama.cpp:**
 
-./main -m ../outputs/unsloth-nemotron-function-calling-gguf/model-q4_k_m.gguf \
+```bash
+# macOS (Homebrew)
+brew install llama.cpp
+
+# Or build from source (Linux/Windows WSL)
+git clone https://github.com/ggerganov/llama.cpp && cd llama.cpp && make
+```
+
+**Run inference:**
+
+```bash
+# GGUF files are saved to: ./outputs/unsloth-nemotron-function-calling-gguf/
+# Filename pattern: {ModelName}.{Quantization}.gguf
+
+llama-cli -m ./outputs/unsloth-nemotron-function-calling-gguf/Llama-3.1-Nemotron-Nano-4B-v1.1.Q4_K_M.gguf \
     -p "What's the weather in Tokyo?" --ctx-size 4096
 ```
 
