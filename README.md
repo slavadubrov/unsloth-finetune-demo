@@ -23,29 +23,29 @@ A beginner-friendly demo for fine-tuning NVIDIA's Nemotron-Nano-4B model using [
 ```bash
 # Clone repository
 git clone https://github.com/slavadubrov/unsloth-finetune-demo.git
-cd fine-tuning-repo
+cd unsloth-finetune-demo
 
 # Sync dependencies (installs uv if needed: curl -LsSf https://astral.sh/uv/install.sh | sh)
 uv sync
 
 # Run fine-tuning with 1000 samples (quick test)
-uv run python finetune.py --max-samples 1000
+uv run finetune --max-samples 1000
 ```
 
 ## Output Format Options
 
 **For beginners**: Choose the format based on how you plan to use your fine-tuned model:
 
-| Format           | Command                                   | Size       | Best For                   |
-| ---------------- | ----------------------------------------- | ---------- | -------------------------- |
-| **LoRA Adapter** | `uv run python finetune.py`               | ~100-500MB | Python/PyTorch inference   |
-| **Merged Model** | `uv run python finetune.py --merge`       | ~8-16GB    | Sharing, simple deployment |
-| **GGUF**         | `uv run python finetune.py --gguf q4_k_m` | ~2-4GB     | CPU inference, llama.cpp   |
+| Format           | Command                         | Size       | Best For                   |
+| ---------------- | ------------------------------- | ---------- | -------------------------- |
+| **LoRA Adapter** | `uv run finetune`               | ~100-500MB | Python/PyTorch inference   |
+| **Merged Model** | `uv run finetune --merge`       | ~8-16GB    | Sharing, simple deployment |
+| **GGUF**         | `uv run finetune --gguf q4_k_m` | ~2-4GB     | CPU inference, llama.cpp   |
 
 ### 1️⃣ LoRA Adapter (Default)
 
 ```bash
-uv run python finetune.py --max-samples 1000
+uv run finetune --max-samples 1000
 ```
 
 - ✅ Smallest file size - only saves adapter weights
@@ -55,7 +55,7 @@ uv run python finetune.py --max-samples 1000
 ### 2️⃣ Merged Model
 
 ```bash
-uv run python finetune.py --merge
+uv run finetune --merge
 ```
 
 - ✅ Easier to share - single model with all weights
@@ -65,7 +65,7 @@ uv run python finetune.py --merge
 ### 3️⃣ GGUF Format
 
 ```bash
-uv run python finetune.py --gguf q4_k_m
+uv run finetune --gguf q4_k_m
 ```
 
 - ✅ Runs on CPU with llama.cpp
@@ -77,7 +77,7 @@ uv run python finetune.py --gguf q4_k_m
 
 ## Configuration
 
-Default settings in `finetune.py`:
+Default settings in [`src/unsloth_demo/config.py`](src/unsloth_demo/config.py):
 
 ```python
 MODEL_NAME = "nvidia/Llama-3.1-Nemotron-Nano-4B-v1.1"  # 4B params, 128K context
@@ -85,7 +85,7 @@ DATASET_NAME = "glaiveai/glaive-function-calling-v2"   # 113K examples
 MAX_SEQ_LENGTH = 4096
 LORA_R = 16
 LORA_ALPHA = 32
-OUTPUT_DIR = "./outputs/unsloth-nemotron-function-calling"
+DEFAULT_OUTPUT_DIR = "./outputs/unsloth-nemotron-function-calling"
 ```
 
 ### Memory Requirements
@@ -97,7 +97,7 @@ OUTPUT_DIR = "./outputs/unsloth-nemotron-function-calling"
 | RTX 4080    | 16GB | 2          | ✓ Recommended |
 | RTX 4090    | 24GB | 4          | ✓ Fast        |
 
-> **OOM?** Reduce `per_device_train_batch_size` or `MAX_SEQ_LENGTH` in `finetune.py`
+> **OOM?** Reduce `BATCH_SIZE` or `MAX_SEQ_LENGTH` in `src/unsloth_demo/config.py`
 
 ## Inference
 
@@ -105,13 +105,13 @@ OUTPUT_DIR = "./outputs/unsloth-nemotron-function-calling"
 
 ```bash
 # Default: uses ./outputs/unsloth-nemotron-function-calling
-uv run python inference.py
+uv run infer
 
 # Custom model path
-uv run python inference.py --model ./outputs/unsloth-nemotron-function-calling-merged
+uv run infer --model ./outputs/unsloth-nemotron-function-calling-merged
 
 # Custom prompt
-uv run python inference.py --prompt "Book a flight to Tokyo for tomorrow"
+uv run infer --prompt "Book a flight to Tokyo for tomorrow"
 ```
 
 ### With llama.cpp (GGUF)
@@ -152,8 +152,8 @@ Query the server (in another terminal):
 source .venv-vllm/bin/activate
 
 # Run inference
-python inference_vllm.py
-python inference_vllm.py --prompt "Book a flight to Tokyo for tomorrow"
+uv run infer-vllm
+uv run infer-vllm --prompt "Book a flight to Tokyo for tomorrow"
 ```
 
 | Format       | vLLM Compatible | Notes                    |
@@ -206,13 +206,31 @@ Already optimized by default with:
 
 ```
 unsloth-finetune-demo/
-├── finetune.py          # Main training script
-├── inference.py         # Unsloth inference script
-├── inference_vllm.py    # vLLM inference script
-├── pyproject.toml       # Dependencies
-├── README.md            # This file
-└── outputs/             # Training outputs (auto-created)
+├── src/
+│   └── unsloth_demo/
+│       ├── __init__.py       # Package init
+│       ├── config.py         # Constants & configuration
+│       ├── data.py           # Dataset loading & formatting
+│       ├── model.py          # Model loading & saving
+│       ├── training.py       # Training logic
+│       └── cli/
+│           ├── __init__.py
+│           ├── finetune.py   # Training CLI entry point
+│           └── inference.py  # Inference CLI entry points
+├── docs/
+│   ├── architecture.md       # System overview with diagrams
+│   ├── training.md           # Training pipeline details
+│   └── inference.md          # Inference options guide
+├── outputs/                  # Training outputs (auto-created)
+├── pyproject.toml            # Dependencies & entry points
+└── README.md                 # This file
 ```
+
+## Documentation
+
+- [Architecture Overview](docs/architecture.md) - Package structure and data flow diagrams
+- [Training Guide](docs/training.md) - Detailed training pipeline explanation
+- [Inference Guide](docs/inference.md) - All inference options explained
 
 ## References
 
