@@ -1,15 +1,14 @@
 """Fine-tune Nemotron-Nano-4B for function calling using Unsloth.
 
-Unsloth provides 2x faster training with 60% less memory usage through
-optimized kernels and efficient LoRA implementation.
-
 Usage:
     uv run finetune
     uv run finetune --max-samples 1000
-    uv run finetune --merge --gguf q4_k_m
+    uv run finetune --max-samples 1000 --merge --gguf q4_k_m
 """
 
 import argparse
+
+import unsloth  # noqa: F401  # Must load before trl and transformers so its patches apply
 
 from unsloth_demo.config import DEFAULT_OUTPUT_DIR
 from unsloth_demo.data import load_glaive_dataset
@@ -33,6 +32,8 @@ Examples:
   finetune --max-samples 1000     # Quick test with 1000 samples
   finetune --merge                # Also save merged model
   finetune --gguf q4_k_m          # Also export to GGUF format
+
+Every run trains; --merge and --gguf add exports after training.
         """,
     )
     parser.add_argument(
@@ -69,11 +70,13 @@ def main():
     # Load model with LoRA adapters
     model, tokenizer = load_model_and_tokenizer()
 
-    # Prepare dataset
-    dataset = load_glaive_dataset(max_samples=args.max_samples)
+    # Prepare train and eval splits in the model's chat format
+    train_dataset, eval_dataset = load_glaive_dataset(tokenizer, max_samples=args.max_samples)
+    print("\nFirst training row as the model sees it:\n")
+    print(train_dataset[0]["text"][:2000])
 
     # Train
-    train(model, tokenizer, dataset, output_dir=args.output_dir)
+    train(model, tokenizer, train_dataset, eval_dataset, output_dir=args.output_dir)
 
     # Save LoRA adapter (always)
     save_lora_adapter(model, tokenizer, args.output_dir)
@@ -86,7 +89,11 @@ def main():
     if args.gguf:
         save_gguf(model, tokenizer, args.output_dir, quantization=args.gguf)
 
-    print("\n✅ Training complete!")
+    print(f"\nTraining complete. Adapter: {args.output_dir}")
+    if args.merge:
+        print(f"Merged model: {args.output_dir}-merged")
+    if args.gguf:
+        print(f"GGUF: {args.output_dir}-gguf")
 
 
 if __name__ == "__main__":

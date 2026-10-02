@@ -1,256 +1,109 @@
 # Unsloth Fine-Tuning Demo
 
-A beginner-friendly demo for fine-tuning NVIDIA's Nemotron-Nano-4B model using [Unsloth](https://github.com/unslothai/unsloth).
-
-## Features
-
-> **Performance compared to vanilla Hugging Face Transformers + PEFT fine-tuning**
-
-- 🚀 **2x faster training** through optimized CUDA kernels
-- 💾 **60% less VRAM** usage with efficient LoRA implementation
-- 📦 **Multiple export formats**: LoRA adapter, merged model, or GGUF
-- 🎯 **Function calling dataset**: Pre-configured for glaive-function-calling-v2
+This repository fine-tunes NVIDIA's [Llama-3.1-Nemotron-Nano-4B-v1.1](https://huggingface.co/nvidia/Llama-3.1-Nemotron-Nano-4B-v1.1) for function calling with [Unsloth](https://docs.unsloth.ai/), LoRA on a 4-bit base, and TRL's `SFTTrainer`. The training data is [glaive-function-calling-v2](https://huggingface.co/datasets/glaiveai/glaive-function-calling-v2). It accompanies the article [LLM Fine-Tuning Guide](https://slavadubrov.com/blog/2026/01/04/llm-fine-tuning-guide/).
 
 ## Requirements
 
-- **Python**: 3.10-3.12
-- **GPU**: NVIDIA with 12GB+ VRAM
-- **CUDA**: 11.8+ or 12.1+
-- **OS**: Linux (or WSL2 on Windows)
+- Python 3.10 to 3.12 and [uv](https://docs.astral.sh/uv/)
+- Linux (or WSL2) with an NVIDIA GPU. Unsloth trains on CUDA only.
 
-## Quick Start
+## Quick start
 
 ```bash
-# Clone repository
 git clone https://github.com/slavadubrov/unsloth-finetune-demo.git
 cd unsloth-finetune-demo
-
-# Sync dependencies (installs uv if needed: curl -LsSf https://astral.sh/uv/install.sh | sh)
 uv sync
 
-# Run fine-tuning with 1000 samples (quick test)
-uv run finetune --max-samples 1000
+# Train on 1,000 random rows, then also save a merged model and a GGUF file
+uv run finetune --max-samples 1000 --merge --gguf q4_k_m
+
+# First check: ask the adapter to call the demo tool
+uv run infer --prompt "Book a flight to Tokyo"
 ```
 
-## Output Format Options
+Every `finetune` run trains. `--merge` and `--gguf` add exports after training; there is no export-only command.
 
-**For beginners**: Choose the format based on how you plan to use your fine-tuned model:
+## What the training run does
 
-| Format           | Command                         | Size       | Best For                   |
-| ---------------- | ------------------------------- | ---------- | -------------------------- |
-| **LoRA Adapter** | `uv run finetune`               | ~100-500MB | Python/PyTorch inference   |
-| **Merged Model** | `uv run finetune --merge`       | ~8-16GB    | Sharing, simple deployment |
-| **GGUF**         | `uv run finetune --gguf q4_k_m` | ~2-4GB     | CPU inference, llama.cpp   |
+1. Loads the base model in 4-bit and adds LoRA adapters (`r=16`, `alpha=32`, all attention and MLP projections).
+2. Sets the tokenizer's chat template to [`chat_template.jinja`](src/unsloth_demo/chat_template.jinja), the model card's tool-calling template with one fix (below).
+3. Converts each glaive row in [`data.py`](src/unsloth_demo/data.py). The function definitions in the `system` column become a `tools` list. The `chat` column becomes `messages`, and each `<functioncall>` becomes a structured `tool_calls` entry. Rows with malformed JSON are dropped (149 of 112,960).
+4. Renders each row with `tokenizer.apply_chat_template(messages, tools=tools)`. The tools appear in `<AVAILABLE_TOOLS>` and each call in `<TOOLCALL>`, the same format vLLM's Nemotron parser reads at serving time.
+5. Holds out 5% of the rows as an evaluation split (seed 42) and prints the first training row before training starts.
+6. Trains with `SFTConfig`: `max_length=4096`, no packing, full-sequence loss, held-out loss once per epoch. Held-out loss is a diagnostic. It does not show whether the tool calls are correct.
 
-### 1️⃣ LoRA Adapter (Default)
+The template fix: the model card's template renders a past tool call as `{"name": ..., "arguments": {...}` without the closing brace. The model would learn to emit that text, and the vLLM parser could not read it as JSON. The fixed template adds the brace. `tests/test_data.py` checks that every rendered `<TOOLCALL>` parses.
+
+## Outputs
+
+| Run flag        | Directory                                           | Load with                                                   |
+| --------------- | --------------------------------------------------- | ----------------------------------------------------------- |
+| (always)        | `outputs/unsloth-nemotron-function-calling/`        | `uv run infer`, vLLM `--enable-lora` (needs the base model) |
+| `--merge`       | `outputs/unsloth-nemotron-function-calling-merged/` | `uv run infer --model ...`, vLLM, `lm_eval`, Transformers   |
+| `--gguf q4_k_m` | `outputs/unsloth-nemotron-function-calling-gguf/`   | llama.cpp, Ollama                                           |
+
+Other GGUF options: `q5_k_m`, `q8_0`, `f16`.
+
+## Check the adapter
 
 ```bash
-uv run finetune --max-samples 1000
+uv run infer --prompt "Book a flight to Tokyo"
 ```
 
-- ✅ Smallest file size - only saves adapter weights
-- ✅ Most flexible - can load with different base model versions
-- 📁 Output: `./outputs/unsloth-nemotron-function-calling/`
+`infer` sends the prompt with one tool, `book_flight(destination)`, using the training template. A trained adapter should answer with `<TOOLCALL>[{"name": "book_flight", "arguments": {"destination": "Tokyo"}}]</TOOLCALL>`. Use `--model outputs/unsloth-nemotron-function-calling-merged` to check the merged model.
 
-### 2️⃣ Merged Model
+## Serve with vLLM
+
+The model card serves tool calls with the `llama_nemotron_json` parser from its `llama_nemotron_nano_toolcall_parser.py` plugin. Serve the adapter with that parser and this repository's template, so serving uses the format the adapter was trained on.
 
 ```bash
-uv run finetune --merge
-```
-
-- ✅ Easier to share - single model with all weights
-- ✅ Simpler deployment - no separate base model needed
-- 📁 Output: `./outputs/unsloth-nemotron-function-calling-merged/`
-
-### 3️⃣ GGUF Format
-
-```bash
-uv run finetune --gguf q4_k_m
-```
-
-- ✅ Runs on CPU with llama.cpp
-- ✅ Perfect for edge/local deployment
-- 📁 Output: `./outputs/unsloth-nemotron-function-calling-gguf/`
-- Other quantization options: `q5_k_m`, `q8_0`, `f16`
-
-> **Tip**: Start with LoRA adapter for testing. Use `--merge` to share, or `--gguf` for CPU deployment.
-
-## Configuration
-
-Default settings in [`src/unsloth_demo/config.py`](src/unsloth_demo/config.py):
-
-```python
-MODEL_NAME = "nvidia/Llama-3.1-Nemotron-Nano-4B-v1.1"  # 4B params, 128K context
-DATASET_NAME = "glaiveai/glaive-function-calling-v2"   # 113K examples
-MAX_SEQ_LENGTH = 4096
-LORA_R = 16
-LORA_ALPHA = 32
-DEFAULT_OUTPUT_DIR = "./outputs/unsloth-nemotron-function-calling"
-```
-
-### Memory Requirements
-
-| GPU         | VRAM | Batch Size | Status        |
-| ----------- | ---- | ---------- | ------------- |
-| RTX 3060    | 12GB | 1          | ✓ Works       |
-| RTX 4070 Ti | 12GB | 1-2        | ✓ Works       |
-| RTX 4080    | 16GB | 2          | ✓ Recommended |
-| RTX 4090    | 24GB | 4          | ✓ Fast        |
-
-> **OOM?** Reduce `BATCH_SIZE` or `MAX_SEQ_LENGTH` in `src/unsloth_demo/config.py`
-
-## Inference
-
-### With Unsloth (LoRA/Merged)
-
-```bash
-# Default: uses ./outputs/unsloth-nemotron-function-calling
-uv run infer
-
-# Custom model path
-uv run infer --model ./outputs/unsloth-nemotron-function-calling-merged
-
-# Custom prompt
-uv run infer --prompt "Book a flight to Tokyo for tomorrow"
-```
-
-### With llama.cpp (GGUF)
-
-**Install llama.cpp:**
-
-```bash
-# macOS (Homebrew)
-brew install llama.cpp
-
-# Or build from source (Linux/Windows WSL)
-git clone https://github.com/ggerganov/llama.cpp && cd llama.cpp && make
-```
-
-**Run inference:**
-
-```bash
-# GGUF files are saved to: ./outputs/unsloth-nemotron-function-calling-gguf/
-# Filename pattern: {ModelName}.{Quantization}.gguf
-
-llama-cli -m ./outputs/unsloth-nemotron-function-calling-gguf/Llama-3.1-Nemotron-Nano-4B-v1.1.Q4_K_M.gguf \
-    -p "What's the weather in Tokyo?" --ctx-size 4096
-```
-
-### With vLLM (Merged Model)
-
-> **Requires**: Merged model format (`--merge` flag during training)
-
-```bash
-# Create separate venv for vLLM (recommended - different dependencies)
+# vLLM has its own dependencies; use a separate environment
 uv venv .venv-vllm --python 3.12
 source .venv-vllm/bin/activate
+uv pip install vllm huggingface_hub
+hf download nvidia/Llama-3.1-Nemotron-Nano-4B-v1.1 \
+    llama_nemotron_nano_toolcall_parser.py --local-dir serving
 
-# Install vLLM
-uv pip install vllm openai
-
-# Start OpenAI-compatible API server
-# Note: --max-model-len limits context to fit in VRAM (adjust based on your GPU)
-vllm serve ./outputs/unsloth-nemotron-function-calling-merged \
-    --host 0.0.0.0 \
-    --port 8000 \
+vllm serve nvidia/Llama-3.1-Nemotron-Nano-4B-v1.1 \
+    --trust-remote-code \
+    --enable-lora \
+    --lora-modules function-calling=./outputs/unsloth-nemotron-function-calling \
+    --enable-auto-tool-choice \
+    --tool-parser-plugin ./serving/llama_nemotron_nano_toolcall_parser.py \
+    --tool-call-parser llama_nemotron_json \
+    --chat-template ./src/unsloth_demo/chat_template.jinja \
     --max-model-len 4096
 ```
 
-> **OOM Error?** Reduce `--max-model-len` (try 2048) or increase `--gpu-memory-utilization 0.95`
-
-Query the server (in another terminal):
+In another terminal, from the project environment:
 
 ```bash
-# Activate the vLLM venv
-source .venv-vllm/bin/activate
-
-# Run inference
-uv run infer-vllm
-uv run infer-vllm --prompt "Book a flight to Tokyo for tomorrow"
+uv run --with openai infer-vllm --prompt "Book a flight to Tokyo"
 ```
 
-| Format       | vLLM Compatible | Notes                    |
-| ------------ | --------------- | ------------------------ |
-| LoRA Adapter | ❌              | Use `--merge` to convert |
-| Merged Model | ✅              | Full GPU inference       |
-| GGUF         | ❌              | Use llama.cpp instead    |
+`infer-vllm` sends the same `book_flight` tool and prints `message.tool_calls`. It prints `none` when the server parsed no call. To serve the merged model instead, replace the model path with `./outputs/unsloth-nemotron-function-calling-merged` and drop `--enable-lora` and `--lora-modules`.
 
-## Installation (Alternative Methods)
-
-### Manual Installation (without UV)
+## Run the GGUF file
 
 ```bash
-python3.12 -m venv .venv
-source .venv/bin/activate
-
-# For CUDA 12.1+
-pip install "unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git"
-
-# Or for CUDA 11.8
-pip install "unsloth[cu118] @ git+https://github.com/unslothai/unsloth.git"
-
-pip install peft transformers datasets trl accelerate
+ls outputs/unsloth-nemotron-function-calling-gguf/   # the file name depends on the Unsloth version
+llama-cli -m outputs/unsloth-nemotron-function-calling-gguf/MODEL_FILE.gguf \
+    -p "What's the weather in Tokyo?" --ctx-size 4096
 ```
 
-## Troubleshooting
+This checks a plain-text answer only. It does not test a tool call.
 
-### "Cannot find Unsloth kernels"
+## Tests
 
-Check CUDA version and reinstall:
+The tests run on CPU, without the GPU dependencies. The render test downloads the model's tokenizer.
 
 ```bash
-nvcc --version
-
-# For CUDA 12.1+
-uv pip install "unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git"
-
-# For CUDA 11.8
-uv pip install "unsloth[cu118] @ git+https://github.com/unslothai/unsloth.git"
+uv run --no-project --with pytest --with datasets --with transformers --with jinja2 pytest
 ```
 
-### Slow Training
+## Configuration
 
-Already optimized by default with:
-
-- `use_gradient_checkpointing="unsloth"`
-- `packing=True`
-
-## Project Structure
-
-```
-unsloth-finetune-demo/
-├── src/
-│   └── unsloth_demo/
-│       ├── __init__.py       # Package init
-│       ├── config.py         # Constants & configuration
-│       ├── data.py           # Dataset loading & formatting
-│       ├── model.py          # Model loading & saving
-│       ├── training.py       # Training logic
-│       └── cli/
-│           ├── __init__.py
-│           ├── finetune.py   # Training CLI entry point
-│           └── inference.py  # Inference CLI entry points
-├── docs/
-│   ├── architecture.md       # System overview with diagrams
-│   ├── training.md           # Training pipeline details
-│   └── inference.md          # Inference options guide
-├── outputs/                  # Training outputs (auto-created)
-├── pyproject.toml            # Dependencies & entry points
-└── README.md                 # This file
-```
-
-## Documentation
-
-- [Architecture Overview](docs/architecture.md) - Package structure and data flow diagrams
-- [Training Guide](docs/training.md) - Detailed training pipeline explanation
-- [Inference Guide](docs/inference.md) - All inference options explained
-
-## References
-
-- [Unsloth Documentation](https://docs.unsloth.ai/)
-- [Unsloth GitHub](https://github.com/unslothai/unsloth)
-- [Nemotron Model Card](https://huggingface.co/nvidia/Llama-3.1-Nemotron-Nano-4B-v1.1)
-- [Glaive Dataset](https://huggingface.co/datasets/glaiveai/glaive-function-calling-v2)
+All settings are in [`src/unsloth_demo/config.py`](src/unsloth_demo/config.py): model and dataset names, LoRA rank and alpha, sequence length, batch size, learning rate, evaluation share, and the demo tool. If training runs out of memory, lower `BATCH_SIZE` (and raise `GRADIENT_ACCUMULATION_STEPS` to keep the effective batch) or lower `MAX_SEQ_LENGTH`. With this tokenizer and template, the longest of the 112,811 rendered rows is 4,076 tokens (median 370), so 4096 truncates none of them.
 
 ## License
 

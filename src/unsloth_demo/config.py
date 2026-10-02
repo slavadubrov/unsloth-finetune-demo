@@ -4,6 +4,8 @@ This module centralizes all configuration values used across the project.
 Modify these values to customize your fine-tuning run.
 """
 
+from pathlib import Path
+
 # =============================================================================
 # Model Configuration
 # =============================================================================
@@ -12,7 +14,10 @@ MODEL_NAME = "nvidia/Llama-3.1-Nemotron-Nano-4B-v1.1"
 """Base model to fine-tune. Nemotron-Nano-4B is a 4B parameter model with 128K context."""
 
 DATASET_NAME = "glaiveai/glaive-function-calling-v2"
-"""Training dataset. Contains 113K function calling examples."""
+"""Training dataset: 112,960 rows; tool definitions are in the `system` column."""
+
+CHAT_TEMPLATE_PATH = Path(__file__).with_name("chat_template.jinja")
+"""The model card's tool-calling template with one fix. Used in training and by vLLM."""
 
 # =============================================================================
 # LoRA Configuration
@@ -25,7 +30,7 @@ LORA_R = 16
 """LoRA rank. Higher values = more parameters = better quality but slower."""
 
 LORA_ALPHA = 32
-"""LoRA alpha scaling factor. Usually set to 2x LORA_R."""
+"""LoRA alpha. The update is scaled by LORA_ALPHA / LORA_R (2 here)."""
 
 LORA_DROPOUT = 0.05
 """Dropout rate for LoRA layers. Helps prevent overfitting."""
@@ -75,10 +80,31 @@ SAVE_TOTAL_LIMIT = 3
 RANDOM_SEED = 42
 """Random seed for reproducibility."""
 
+EVAL_FRACTION = 0.05
+"""Share of rows held out as the evaluation split (fixed by RANDOM_SEED)."""
+
 # =============================================================================
-# Chat Template Tokens
+# Inference Configuration
 # =============================================================================
 
-IM_START = "<|im_start|>"
-IM_END = "<|im_end|>"
-"""ChatML-style tokens for formatting conversations."""
+SERVED_MODEL_NAME = "function-calling"
+"""Adapter name used with `vllm serve --lora-modules`."""
+
+DEFAULT_PROMPT = "Book a flight to Tokyo"
+"""Default user prompt for `infer` and `infer-vllm`."""
+
+DEMO_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "book_flight",
+        "description": "Book a flight to a city.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "destination": {"type": "string", "description": "The destination city"},
+            },
+            "required": ["destination"],
+        },
+    },
+}
+"""Tool sent with the default prompt. Same shape as the glaive tool definitions."""

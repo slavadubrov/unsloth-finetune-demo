@@ -1,6 +1,6 @@
 [project]
 name = "unsloth-finetune-demo"
-version = "0.1.0"
+version = "0.2.0"
 description = "Unsloth fine-tuning demo for Nemotron-Nano-4B on function calling"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -35,3 +35,6 @@ src = ["src"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]

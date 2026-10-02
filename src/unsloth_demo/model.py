@@ -11,6 +11,7 @@ from pathlib import Path
 from unsloth import FastLanguageModel
 
 from .config import (
+    CHAT_TEMPLATE_PATH,
     LORA_ALPHA,
     LORA_DROPOUT,
     LORA_R,
@@ -44,6 +45,8 @@ def load_model_and_tokenizer(
         load_in_4bit=load_in_4bit,
         trust_remote_code=True,
     )
+    # Training rows, the saved tokenizer, and vLLM all use this one template.
+    tokenizer.chat_template = CHAT_TEMPLATE_PATH.read_text()
 
     # Add LoRA adapters
     model = FastLanguageModel.get_peft_model(
@@ -90,8 +93,7 @@ def load_model_for_inference(
 def save_lora_adapter(model, tokenizer, output_dir: str):
     """Save LoRA adapter weights only.
 
-    This is the most storage-efficient option, saving only the trained
-    adapter weights (~100-500MB) instead of the full model.
+    This saves only the trained adapter weights, not the base model.
 
     Args:
         model: Fine-tuned model with LoRA adapters.
@@ -107,8 +109,7 @@ def save_lora_adapter(model, tokenizer, output_dir: str):
 def save_merged_model(model, tokenizer, output_dir: str):
     """Merge LoRA weights into base model and save.
 
-    Creates a standalone model that doesn't require the base model
-    for inference. Larger file size (~8-16GB) but simpler deployment.
+    Creates a standalone 16-bit model that does not need the base model at load time.
 
     Args:
         model: Fine-tuned model with LoRA adapters.
