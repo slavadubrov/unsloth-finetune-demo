@@ -1,12 +1,7 @@
-"""Training logic for Unsloth fine-tuning.
-
-This module provides the core training functionality using SFTTrainer
-with Unsloth optimizations for faster, memory-efficient training.
-"""
+"""SFT training with TRL's SFTTrainer (patched by Unsloth on import)."""
 
 import torch
-from transformers import TrainingArguments
-from trl import SFTTrainer
+from trl import SFTConfig, SFTTrainer
 
 from .config import (
     BATCH_SIZE,
@@ -23,62 +18,43 @@ from .config import (
 )
 
 
-def create_training_args(output_dir: str = DEFAULT_OUTPUT_DIR) -> TrainingArguments:
-    """Create TrainingArguments with optimized defaults.
+def train(
+    model, tokenizer, train_dataset, eval_dataset, output_dir: str = DEFAULT_OUTPUT_DIR
+) -> SFTTrainer:
+    """Run SFT on the rendered `text` rows and report held-out loss once per epoch.
 
-    Args:
-        output_dir: Directory for checkpoints and final model.
-
-    Returns:
-        Configured TrainingArguments instance.
-    """
-    return TrainingArguments(
-        output_dir=output_dir,
-        per_device_train_batch_size=BATCH_SIZE,
-        gradient_accumulation_steps=GRADIENT_ACCUMULATION_STEPS,
-        warmup_ratio=WARMUP_RATIO,
-        num_train_epochs=NUM_EPOCHS,
-        learning_rate=LEARNING_RATE,
-        fp16=not torch.cuda.is_bf16_supported(),
-        bf16=torch.cuda.is_bf16_supported(),
-        logging_steps=LOGGING_STEPS,
-        save_steps=SAVE_STEPS,
-        save_total_limit=SAVE_TOTAL_LIMIT,
-        optim="adamw_8bit",
-        seed=RANDOM_SEED,
-        report_to="none",  # Set to "wandb" for W&B logging
-    )
-
-
-def train(model, tokenizer, dataset, output_dir: str = DEFAULT_OUTPUT_DIR) -> SFTTrainer:
-    """Run SFT training with Unsloth optimizations.
-
-    Uses sequence packing for efficient training of variable-length
-    conversations, reducing padding waste.
-
-    Args:
-        model: Model with LoRA adapters applied.
-        tokenizer: Associated tokenizer.
-        dataset: Prepared dataset with 'text' field.
-        output_dir: Directory for checkpoints.
-
-    Returns:
-        Trained SFTTrainer instance.
+    Held-out token loss is a diagnostic. It does not measure whether tool calls are correct.
     """
     print("Starting training...")
-
-    training_args = create_training_args(output_dir)
+    bf16 = torch.cuda.is_bf16_supported()
 
     trainer = SFTTrainer(
         model=model,
-        tokenizer=tokenizer,
-        train_dataset=dataset,
-        args=training_args,
-        max_seq_length=MAX_SEQ_LENGTH,
-        dataset_text_field="text",
-        packing=True,  # Efficient packing of short sequences
+        processing_class=tokenizer,
+        train_dataset=train_dataset,
+        eval_dataset=eval_dataset,
+        args=SFTConfig(
+            output_dir=output_dir,
+            dataset_text_field="text",
+            max_length=MAX_SEQ_LENGTH,
+            packing=False,  # One row per sequence, so row boundaries are easy to inspect
+            assistant_only_loss=False,  # The Nemotron template has no generation spans
+            eval_strategy="epoch",
+            per_device_train_batch_size=BATCH_SIZE,
+            gradient_accumulation_steps=GRADIENT_ACCUMULATION_STEPS,
+            warmup_ratio=WARMUP_RATIO,
+            num_train_epochs=NUM_EPOCHS,
+            learning_rate=LEARNING_RATE,
+            bf16=bf16,
+            fp16=not bf16,
+            optim="adamw_8bit",
+            logging_steps=LOGGING_STEPS,
+            save_steps=SAVE_STEPS,
+            save_total_limit=SAVE_TOTAL_LIMIT,
+            seed=RANDOM_SEED,
+            report_to="none",  # Set to "wandb" for W&B logging
+        ),
     )
 
     trainer.train()
-
     return trainer

@@ -11,7 +11,13 @@ Usage:
 
 import argparse
 
-from unsloth_demo.config import DEFAULT_OUTPUT_DIR, MAX_SEQ_LENGTH
+from unsloth_demo.config import (
+    DEFAULT_OUTPUT_DIR,
+    DEFAULT_PROMPT,
+    DEMO_TOOL,
+    MAX_SEQ_LENGTH,
+    SERVED_MODEL_NAME,
+)
 
 
 def run_unsloth_inference(args: argparse.Namespace):
@@ -25,13 +31,15 @@ def run_unsloth_inference(args: argparse.Namespace):
 
     print("Model loaded. Generating response...\n")
 
-    # Prepare the prompt
+    # Same template and tool format as the training rows
     messages = [{"role": "user", "content": args.prompt}]
-    inputs = tokenizer.apply_chat_template(messages, return_tensors="pt").to("cuda")
+    inputs = tokenizer.apply_chat_template(
+        messages, tools=[DEMO_TOOL], add_generation_prompt=True, return_tensors="pt"
+    ).to("cuda")
 
-    # Generate response
-    outputs = model.generate(inputs, max_new_tokens=args.max_tokens)
-    response = tokenizer.decode(outputs[0], skip_special_tokens=True)
+    # Generate and decode only the new tokens
+    outputs = model.generate(input_ids=inputs, max_new_tokens=args.max_tokens)
+    response = tokenizer.decode(outputs[0][inputs.shape[1] :], skip_special_tokens=True)
 
     print("=" * 50)
     print("PROMPT:")
@@ -55,15 +63,23 @@ def run_vllm_inference(args: argparse.Namespace):
     response = client.chat.completions.create(
         model=args.model,
         messages=[{"role": "user", "content": args.prompt}],
+        tools=[DEMO_TOOL],
+        tool_choice="auto",
         max_tokens=args.max_tokens,
     )
+    message = response.choices[0].message
 
     print("=" * 50)
     print("PROMPT:")
     print(args.prompt)
     print("=" * 50)
-    print("RESPONSE:")
-    print(response.choices[0].message.content)
+    print("CONTENT:")
+    print(message.content)
+    print("TOOL CALLS:")
+    for call in message.tool_calls or []:
+        print(f"{call.function.name}({call.function.arguments})")
+    if not message.tool_calls:
+        print("none: the server parsed no tool call from this response")
     print("=" * 50)
 
 
@@ -88,7 +104,7 @@ Examples:
     parser.add_argument(
         "--prompt",
         type=str,
-        default="What's the weather in Paris?",
+        default=DEFAULT_PROMPT,
         help="User prompt to send to the model",
     )
     parser.add_argument(
@@ -112,13 +128,8 @@ def create_vllm_parser() -> argparse.ArgumentParser:
         description="Query vLLM server with OpenAI-compatible API",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Prerequisites:
-  1. Train with merged output: finetune --merge
-  2. Start vLLM server:
-     uv venv .venv-vllm --python 3.12
-     source .venv-vllm/bin/activate
-     uv pip install vllm openai
-     vllm serve ./outputs/unsloth-nemotron-function-calling-merged --port 8000
+Prerequisite: a running vLLM server that serves the adapter as "function-calling"
+with the model card's tool parser. See "Serve with vLLM" in README.md.
 
 Examples:
   infer-vllm                                      # Default settings
@@ -135,13 +146,13 @@ Examples:
     parser.add_argument(
         "--model",
         type=str,
-        default=f"{DEFAULT_OUTPUT_DIR}-merged",
-        help="Model name (must match path used when starting vLLM server)",
+        default=SERVED_MODEL_NAME,
+        help="Served model name (the name given in --lora-modules)",
     )
     parser.add_argument(
         "--prompt",
         type=str,
-        default="What's the weather in Paris?",
+        default=DEFAULT_PROMPT,
         help="User prompt to send to the model",
     )
     parser.add_argument(

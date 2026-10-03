@@ -1,7 +1,3 @@
-"""Unsloth Fine-Tuning Demo Package.
+"""Unsloth fine-tuning demo: Nemotron-Nano-4B on glaive function-calling data."""
 
-A beginner-friendly demo for fine-tuning NVIDIA's Nemotron-Nano-4B model
-using Unsloth for 2x faster training with 60% less VRAM.
-"""
-
-__version__ = "0.1.0"
+__version__ = "0.2.0"
